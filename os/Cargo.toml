@@ -1,5 +1,5 @@
 [package]
-name = "os-rust"
+name = "os"
 version = "0.1.0"
 edition = "2021"
 
@@ -9,7 +9,6 @@ edition = "2021"
 
 [features]
 board_qemu = []
-log_level = []
 
 [profile.release]
 debug = true
