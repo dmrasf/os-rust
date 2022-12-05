@@ -42,7 +42,6 @@ __restore:
     # case1: start running app by __restore
     # case2: back to U after handling trap
     # now sp->kernel stack(after allocated)
-    mv sp, a0
     # restore sstatus/sepc
     ld t0, 32*8(sp)
     ld t1, 33*8(sp)

@@ -4,12 +4,14 @@
 
 #[macro_use]
 mod console;
-mod batch;
 mod board;
+mod config;
 mod lang_items;
+mod loader;
 mod sbi;
 mod sync;
 mod syscall;
+mod task;
 mod trap;
 
 use core::arch::global_asm;
@@ -21,8 +23,9 @@ global_asm!(include_str!("link_app.S"));
 pub fn rust_main() {
     clear_bss();
     trap::init();
-    batch::init();
-    batch::run_next_app();
+    loader::load_apps();
+    task::run_first_task();
+    panic!("Unreachable in rust_main!");
 }
 
 fn clear_bss() {

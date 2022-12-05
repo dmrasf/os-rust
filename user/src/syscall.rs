@@ -3,6 +3,7 @@ use core::arch::asm;
 const SYSCALL_WRITE: usize = 64;
 const SYSCALL_EXIT: usize = 93;
 const SYSCALL_GET_TASKINFO: usize = 100;
+const SYSCALL_YIELD: usize = 124;
 
 fn syscall(id: usize, args: [usize; 3]) -> isize {
     let mut ret: isize;
@@ -29,3 +30,8 @@ pub fn sys_exit(exit_code: i32) -> isize {
 pub fn sys_get_taskinfo() -> isize {
     syscall(SYSCALL_GET_TASKINFO, [0, 0, 0])
 }
+
+pub fn sys_yield() -> isize {
+    syscall(SYSCALL_YIELD, [0, 0, 0])
+}
+

@@ -43,3 +43,7 @@ pub fn exit(exit_code: i32) -> isize {
 pub fn get_taskinfo() -> isize {
     sys_get_taskinfo()
 }
+
+pub fn yield_() -> isize {
+    sys_yield()
+}
