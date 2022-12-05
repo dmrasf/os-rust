@@ -11,6 +11,8 @@ const SBI_SHUTDOWN: usize = 8;
 
 use core::arch::asm;
 
+use crate::timer::get_time;
+
 #[inline(always)]
 pub fn sbi_call(which: usize, arg0: usize, arg1: usize, arg2: usize) -> usize {
     let mut ret;
@@ -33,4 +35,8 @@ pub fn console_putchar(c: usize) {
 pub fn shutdown() -> ! {
     sbi_call(SBI_SHUTDOWN, 0, 0, 0);
     panic!("It should shutdown!");
+}
+
+pub fn set_timer(timer: usize) {
+    sbi_call(SBI_SET_TIMER, timer, 0, 0);
 }
