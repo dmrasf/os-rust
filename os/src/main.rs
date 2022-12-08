@@ -28,6 +28,9 @@ pub fn rust_main() {
     clear_bss();
     mm::init_heap();
     mm::heap_test();
+    mm::init_frame_allocator();
+    mm::frame_allocator_test();
+    panic!("test done!");
     trap::init();
     loader::load_apps();
     trap::enable_timer_interrupt();
