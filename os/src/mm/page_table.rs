@@ -49,8 +49,8 @@ impl PageTableEntry {
 }
 
 pub struct PageTable {
-    root_ppn: PhysPageNum,
-    frames: Vec<FrameTracker>,
+    pub root_ppn: PhysPageNum,
+    pub frames: Vec<FrameTracker>,
 }
 
 impl PageTable {
@@ -63,9 +63,11 @@ impl PageTable {
     }
 
     pub fn map(&mut self, vpn: VirtPageNum, ppn: PhysPageNum, flags: PTEFlags) {
+        info!("map {:?} to {:?}", vpn, ppn);
         let pte = self.find_pte_create(vpn).unwrap();
         assert!(!pte.is_valid(), "vpn {:?} is mapped before mapping", vpn);
         *pte = PageTableEntry::new(ppn, flags | PTEFlags::V);
+        println!("map done: PTE {:#2X} -> {:?}", pte.bits, pte.ppn());
     }
 
     pub fn unmap(&mut self, vpn: VirtPageNum) {
@@ -79,9 +81,11 @@ impl PageTable {
         let idxs = vpn.indexes();
         let mut ppn = self.root_ppn;
         let mut result: Option<&mut PageTableEntry> = None;
+        println!("find pte: {:?}", vpn);
         for i in 0..3 {
             let pte = &mut ppn.get_pte_array()[idxs[i]];
             if (i == 2) {
+                println!("PTE {:?}[{}] -> {}", ppn, idxs[i], pte.bits);
                 result = Some(pte);
                 break;
             }
@@ -90,6 +94,7 @@ impl PageTable {
                 *pte = PageTableEntry::new(frame.ppn, PTEFlags::V);
                 self.frames.push(frame);
             }
+            println!("PTE {:?}[{}] -> {:?}", ppn, idxs[i], pte.ppn());
             ppn = pte.ppn();
         }
         result

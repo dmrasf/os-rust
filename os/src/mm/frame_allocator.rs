@@ -25,9 +25,12 @@ pub fn init_frame_allocator() {
     extern "C" {
         fn ekernel();
     }
-    info!("PhysAddr range: {:#2x} -> {:#2x}", ekernel as usize, MEMORY_END);
+    info!(
+        "PhysAddr range: {:#2x} -> {:#2x}",
+        ekernel as usize, MEMORY_END
+    );
     FRAME_ALLOCATOR.exclusive_access().init(
-        PhysAddr::from(ekernel as usize).cell(),
+        PhysAddr::from(ekernel as usize).ceil(),
         PhysAddr::from(MEMORY_END).floor(),
     );
 }
@@ -85,12 +88,10 @@ impl FrameAllocator for StackFrameAllocator {
                 ret = Some((self.current - 1).into());
             }
         }
-        info!("alloc ppn: {:?}", ret);
         ret
     }
 
     fn dealloc(&mut self, ppn: PhysPageNum) {
-        info!("dealloc ppn: {:?}", ppn);
         let ppn = ppn.0;
         if ppn >= self.current || self.recycled.iter().find(|&v| *v == ppn).is_some() {
             panic!("Frame ppn={:#x} has not been allocated!", ppn);
@@ -103,26 +104,24 @@ impl StackFrameAllocator {
     pub fn init(&mut self, l: PhysPageNum, r: PhysPageNum) {
         self.current = l.0;
         self.end = r.0;
-        info!(
-            "StackFrameAllocator init: current = {}, end = {}",
-            self.current, self.end
-        );
+        info!("StackFrameAllocator init: current = {:?}, end = {:?}", l, r);
     }
 }
 
 pub fn frame_allocator_test() {
+    debug!("frame_allocator_test start");
     let mut v: Vec<FrameTracker> = Vec::new();
     for i in 0..5 {
         let frame = frame_alloc().unwrap();
-        println!("{:?}", frame);
+        info!("{:?}", frame);
         v.push(frame);
     }
     v.clear();
     for i in 0..5 {
         let frame = frame_alloc().unwrap();
-        println!("{:?}", frame);
+        info!("{:?}", frame);
         v.push(frame);
     }
     drop(v);
-    println!("frame_allocator_test passed!");
+    debug!("frame_allocator_test passed!");
 }

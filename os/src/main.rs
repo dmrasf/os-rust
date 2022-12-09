@@ -30,9 +30,9 @@ pub fn rust_main() {
     mm::heap_test();
     mm::init_frame_allocator();
     mm::frame_allocator_test();
+    mm::map_area_test();
     panic!("test done!");
     trap::init();
-    loader::load_apps();
     trap::enable_timer_interrupt();
     timer::set_next_trigger();
     task::run_first_task();
