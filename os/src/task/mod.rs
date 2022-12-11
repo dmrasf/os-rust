@@ -3,11 +3,10 @@ mod switch;
 mod task;
 
 use self::switch::__switch;
-use crate::{
-    config::MAX_APP_NUM,
-    loader::{get_num_app, init_app_cx},
-    sync::UPSafeCell,
-};
+use crate::loader::get_app_data;
+use crate::trap::context::TrapContext;
+use crate::{loader::get_num_app, sync::UPSafeCell};
+use alloc::vec::Vec;
 use context::TaskContext;
 use core::borrow::BorrowMut;
 use lazy_static::*;
@@ -19,25 +18,17 @@ pub struct TaskManager {
 }
 
 pub struct TaskManagerInner {
-    tasks: [TaskControlBlock; MAX_APP_NUM],
+    tasks: Vec<TaskControlBlock>,
     current_task: usize,
 }
 
 lazy_static! {
     pub static ref TASK_MANAGER: TaskManager = {
         let num_app = get_num_app();
-        let mut tasks = [TaskControlBlock {
-            task_cx: TaskContext::zero_init(),
-            task_status: TaskStatus::UnInit,
-        }; MAX_APP_NUM];
-
-        for (i, task) in tasks.iter_mut().enumerate() {
-            task.task_cx = TaskContext::goto_restore(init_app_cx(i));
-            task.task_status = TaskStatus::Ready;
-            info!(
-                "app_{} TaskControlBlock init: kstack_ptr = {:02X} {:?}",
-                i, task.task_cx.sp, task.task_status
-            );
+        println!("num_app = {}", num_app);
+        let mut tasks: Vec<TaskControlBlock> = Vec::new();
+        for i in 0..num_app {
+            tasks.push(TaskControlBlock::new(get_app_data(i), i));
         }
 
         TaskManager {
@@ -65,6 +56,16 @@ impl TaskManager {
         let current = inner.current_task;
         info!("task_{} -> exit", current);
         inner.tasks[current].task_status = TaskStatus::Exited;
+    }
+
+    fn get_current_token(&self) -> usize {
+        let inner = self.inner.exclusive_access();
+        inner.tasks[inner.current_task].get_user_token()
+    }
+
+    fn get_current_trap_cx(&self) -> &'static mut TrapContext {
+        let inner = self.inner.exclusive_access();
+        inner.tasks[inner.current_task].get_trap_cx()
     }
 
     fn run_next_task(&self) {
@@ -99,7 +100,10 @@ impl TaskManager {
         task0.task_status = TaskStatus::Running;
         let next_task_cx_ptr = &task0.task_cx as *const TaskContext;
         unsafe {
-            info!("run_first_task: switch return to __restore {:2X}", (*next_task_cx_ptr).ra);
+            info!(
+                "run_first_task: switch return to __restore {:2X}",
+                (*next_task_cx_ptr).ra
+            );
         }
         drop(inner);
         let mut _unused = TaskContext::zero_init();
@@ -134,4 +138,12 @@ pub fn suspend_current_and_run_next() {
 pub fn exit_current_and_run_next() {
     mark_current_exited();
     run_next_task();
+}
+
+pub fn current_user_token() -> usize {
+    TASK_MANAGER.get_current_token()
+}
+
+pub fn current_trap_cx() -> &'static mut TrapContext {
+    TASK_MANAGER.get_current_trap_cx()
 }

@@ -1,6 +1,5 @@
 use super::address::*;
-use super::frame_alloc;
-use super::frame_allocator::FrameTracker;
+use super::frame_allocator::*;
 use alloc::vec;
 use alloc::vec::Vec;
 use bitflags::*;
@@ -46,6 +45,15 @@ impl PageTableEntry {
     pub fn is_valid(&self) -> bool {
         (self.flags() & PTEFlags::V) != PTEFlags::empty()
     }
+    pub fn readable(&self) -> bool {
+        (self.flags() & PTEFlags::R) != PTEFlags::empty()
+    }
+    pub fn writable(&self) -> bool {
+        (self.flags() & PTEFlags::W) != PTEFlags::empty()
+    }
+    pub fn executable(&self) -> bool {
+        (self.flags() & PTEFlags::X) != PTEFlags::empty()
+    }
 }
 
 pub struct PageTable {
@@ -64,10 +72,10 @@ impl PageTable {
 
     pub fn map(&mut self, vpn: VirtPageNum, ppn: PhysPageNum, flags: PTEFlags) {
         info!("map {:?} to {:?}", vpn, ppn);
+        let idxs = vpn.indexes();
         let pte = self.find_pte_create(vpn).unwrap();
         assert!(!pte.is_valid(), "vpn {:?} is mapped before mapping", vpn);
         *pte = PageTableEntry::new(ppn, flags | PTEFlags::V);
-        println!("map done: PTE {:#2X} -> {:?}", pte.bits, pte.ppn());
     }
 
     pub fn unmap(&mut self, vpn: VirtPageNum) {
@@ -81,12 +89,11 @@ impl PageTable {
         let idxs = vpn.indexes();
         let mut ppn = self.root_ppn;
         let mut result: Option<&mut PageTableEntry> = None;
-        println!("find pte: {:?}", vpn);
-        for i in 0..3 {
-            let pte = &mut ppn.get_pte_array()[idxs[i]];
-            if (i == 2) {
-                println!("PTE {:?}[{}] -> {}", ppn, idxs[i], pte.bits);
+        for (i, idx) in idxs.iter().enumerate() {
+            let pte = &mut ppn.get_pte_array()[*idx];
+            if i == 2 {
                 result = Some(pte);
+                info!("PTE {:?}[{}] -> ", ppn, idxs[i]);
                 break;
             }
             if !pte.is_valid() {
@@ -94,19 +101,19 @@ impl PageTable {
                 *pte = PageTableEntry::new(frame.ppn, PTEFlags::V);
                 self.frames.push(frame);
             }
-            println!("PTE {:?}[{}] -> {:?}", ppn, idxs[i], pte.ppn());
+            info!("PTE {:?}[{}] -> {:?}", ppn, idxs[i], pte.ppn());
             ppn = pte.ppn();
         }
         result
     }
 
-    fn find_pte(&mut self, vpn: VirtPageNum) -> Option<&mut PageTableEntry> {
+    fn find_pte(&self, vpn: VirtPageNum) -> Option<&mut PageTableEntry> {
         let idxs = vpn.indexes();
         let mut ppn = self.root_ppn;
         let mut result: Option<&mut PageTableEntry> = None;
-        for i in 0..3 {
-            let pte = &mut ppn.get_pte_array()[idxs[i]];
-            if (i == 2) {
+        for (i, idx) in idxs.iter().enumerate() {
+            let pte = &mut ppn.get_pte_array()[*idx];
+            if i == 2 {
                 result = Some(pte);
                 break;
             }
@@ -118,6 +125,14 @@ impl PageTable {
         result
     }
 
+    /// satp
+    /// [0:43] PPN
+    /// [44:59] ASID
+    /// [60:63] MODE
+    pub fn token(&self) -> usize {
+        8usize << 60 | self.root_ppn.0
+    }
+
     pub fn from_token(satp: usize) -> Self {
         Self {
             root_ppn: PhysPageNum::from(satp & ((1usize << 44) - 1)),
@@ -125,7 +140,30 @@ impl PageTable {
         }
     }
 
-    pub fn translate(&mut self, vpn: VirtPageNum) -> Option<PageTableEntry> {
-        self.find_pte(vpn).map(|pte| pte.clone())
+    pub fn translate(&self, vpn: VirtPageNum) -> Option<PageTableEntry> {
+        self.find_pte(vpn).map(|pte| *pte)
     }
+}
+
+/// translate a pointer to a mutable u8 Vec through page table
+pub fn translated_byte_buffer(token: usize, ptr: *const u8, len: usize) -> Vec<&'static mut [u8]> {
+    let page_table = PageTable::from_token(token);
+    let mut start = ptr as usize;
+    let end = start + len;
+    let mut v = Vec::new();
+    while start < end {
+        let start_va = VirtAddr::from(start);
+        let mut vpn = start_va.floor();
+        let ppn = page_table.translate(vpn).unwrap().ppn();
+        vpn.step();
+        let mut end_va: VirtAddr = vpn.into();
+        end_va = end_va.min(VirtAddr::from(end));
+        if end_va.page_offset() == 0 {
+            v.push(&mut ppn.get_bytes_array()[start_va.page_offset()..]);
+        } else {
+            v.push(&mut ppn.get_bytes_array()[start_va.page_offset()..end_va.page_offset()]);
+        }
+        start = end_va.into();
+    }
+    v
 }

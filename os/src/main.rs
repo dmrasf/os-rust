@@ -26,12 +26,8 @@ global_asm!(include_str!("link_app.S"));
 #[no_mangle]
 pub fn rust_main() {
     clear_bss();
-    mm::init_heap();
-    mm::heap_test();
-    mm::init_frame_allocator();
-    mm::frame_allocator_test();
-    mm::map_area_test();
-    panic!("test done!");
+    mm::init();
+    mm::remap_test();
     trap::init();
     trap::enable_timer_interrupt();
     timer::set_next_trigger();

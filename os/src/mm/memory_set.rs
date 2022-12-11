@@ -1,9 +1,14 @@
-use super::page_table::PTEFlags;
-use super::{address::*, frame_alloc, page_table};
-use super::{page_table::PageTable, FrameTracker};
+use super::page_table::*;
+use super::{address::*, frame_allocator::*, page_table};
+use crate::board::MMIO;
 use crate::config::*;
+use crate::sync::UPSafeCell;
+use alloc::sync::Arc;
 use alloc::{collections::BTreeMap, vec::Vec};
 use bitflags::*;
+use core::arch::asm;
+use lazy_static::lazy_static;
+use riscv::register::satp;
 
 extern "C" {
     fn stext();
@@ -18,15 +23,10 @@ extern "C" {
     fn strampoline();
 }
 
-/// 描述一段连续地址的虚拟内存
-pub struct MapArea {
-    /// 虚拟页号的连续区间
-    vpn_range: VPNRange,
-    /// 虚拟页号与物理页号的映射
-    data_frames: BTreeMap<VirtPageNum, FrameTracker>,
-    /// 映射类型
-    map_type: MapType,
-    map_perm: MapPermission,
+lazy_static! {
+    /// 内核空间
+    pub static ref KERNEL_SPACE: Arc<UPSafeCell<MemorySet>> =
+        Arc::new(unsafe { UPSafeCell::new(MemorySet::new_kernel()) });
 }
 
 #[derive(Copy, Clone, PartialEq, Debug)]
@@ -40,10 +40,34 @@ pub enum MapType {
 bitflags! {
     pub struct MapPermission: u8 {
         const R = 1 << 1;
-        const W = 1 << 1;
-        const X = 1 << 1;
-        const U = 1 << 1;
+        const W = 1 << 2;
+        const X = 1 << 3;
+        const U = 1 << 4;
     }
+}
+
+pub fn remap_test() {
+    trace!("remap_test");
+    let mut kernel_space = KERNEL_SPACE.exclusive_access();
+    let mid_text: VirtAddr = ((stext as usize + etext as usize) / 2).into();
+    let mid_rodata: VirtAddr = ((srodata as usize + erodata as usize) / 2).into();
+    let mid_data: VirtAddr = ((sdata as usize + edata as usize) / 2).into();
+    assert!(!kernel_space
+        .page_table
+        .translate(mid_text.floor())
+        .unwrap()
+        .writable());
+    assert!(!kernel_space
+        .page_table
+        .translate(mid_rodata.floor())
+        .unwrap()
+        .writable());
+    assert!(!kernel_space
+        .page_table
+        .translate(mid_data.floor())
+        .unwrap()
+        .executable());
+    println!("remap_test passed!");
 }
 
 /// 地址空间不一定连续的逻辑段
@@ -62,8 +86,9 @@ impl MemorySet {
         }
     }
 
-    /// 在当前地址空间插入新逻辑段
-    fn push(&mut self, mut map_area: MapArea, data: Option<&[u8]>) {}
+    pub fn token(&self) -> usize {
+        self.page_table.token()
+    }
 
     pub fn insert_framed_area(
         &mut self,
@@ -77,7 +102,17 @@ impl MemorySet {
         );
     }
 
+    /// 在当前地址空间插入新逻辑段
+    fn push(&mut self, mut map_area: MapArea, data: Option<&[u8]>) {
+        map_area.map(&mut self.page_table);
+        if let Some(data) = data {
+            map_area.copy_data(&mut self.page_table, data);
+        }
+        self.areas.push(map_area);
+    }
+
     /// Mention that trampoline is not collected by areas.
+    /// 内核和应用都会调用，此处存放trap.S
     fn map_trampoline(&mut self) {
         self.page_table.map(
             VirtAddr::from(TRAMPOLINE).into(),
@@ -86,9 +121,12 @@ impl MemorySet {
         );
     }
 
+    /// 使用identical方式映射，开启页表或关闭页表得到的物理内存相同，内核位于低256GB
     pub fn new_kernel() -> Self {
+        trace!("new_kernel");
         let mut memory_set = Self::new_bare();
         memory_set.map_trampoline();
+        println!("mapping .text section");
         memory_set.push(
             MapArea::new(
                 (stext as usize).into(),
@@ -98,6 +136,7 @@ impl MemorySet {
             ),
             None,
         );
+        println!("mapping .rodata section");
         memory_set.push(
             MapArea::new(
                 (srodata as usize).into(),
@@ -107,6 +146,7 @@ impl MemorySet {
             ),
             None,
         );
+        println!("mapping .data section");
         memory_set.push(
             MapArea::new(
                 (sdata as usize).into(),
@@ -116,6 +156,7 @@ impl MemorySet {
             ),
             None,
         );
+        println!("mapping .bss section");
         memory_set.push(
             MapArea::new(
                 (sbss_with_stack as usize).into(),
@@ -125,6 +166,7 @@ impl MemorySet {
             ),
             None,
         );
+        println!("mapping physical memory");
         memory_set.push(
             MapArea::new(
                 (ekernel as usize).into(),
@@ -134,6 +176,18 @@ impl MemorySet {
             ),
             None,
         );
+        println!("mapping memory-mapped registers");
+        for pair in MMIO {
+            memory_set.push(
+                MapArea::new(
+                    (*pair).0.into(),
+                    ((*pair).0 + (*pair).1).into(),
+                    MapType::Identical,
+                    MapPermission::R | MapPermission::W,
+                ),
+                None,
+            );
+        }
         memory_set
     }
 
@@ -176,6 +230,11 @@ impl MemorySet {
         // guard page
         user_stack_bottom += PAGE_SIZE;
         let user_stack_top = user_stack_bottom + USER_STACK_SIZE;
+        println!(
+            "map user stack: top={:?}, bottom={:?}",
+            VirtAddr::from(user_stack_top),
+            VirtAddr::from(user_stack_bottom)
+        );
         memory_set.push(
             MapArea::new(
                 user_stack_bottom.into(),
@@ -186,6 +245,11 @@ impl MemorySet {
             None,
         );
         // map TrapContext
+        println!(
+            "map TrapContext: start={:?}, end={:?}",
+            VirtAddr::from(TRAP_CONTEXT),
+            VirtAddr::from(TRAMPOLINE)
+        );
         memory_set.push(
             MapArea::new(
                 TRAP_CONTEXT.into(),
@@ -201,6 +265,32 @@ impl MemorySet {
             elf.header.pt2.entry_point() as usize,
         )
     }
+
+    /// 开启页表
+    pub fn activate(&self) {
+        trace!("memory_set active");
+        let satp = self.page_table.token();
+        unsafe {
+            satp::write(satp);
+            /// 清除过期快表
+            asm!("sfence.vma");
+        }
+    }
+
+    pub fn translate(&self, vpn: VirtPageNum) -> Option<PageTableEntry> {
+        self.page_table.translate(vpn)
+    }
+}
+
+/// 描述一段连续地址的虚拟内存
+pub struct MapArea {
+    /// 虚拟页号的连续区间
+    vpn_range: VPNRange,
+    /// 虚拟页号与物理页号的映射
+    data_frames: BTreeMap<VirtPageNum, FrameTracker>,
+    /// 映射类型
+    map_type: MapType,
+    map_perm: MapPermission,
 }
 
 impl MapArea {
@@ -213,7 +303,10 @@ impl MapArea {
     ) -> Self {
         let start_vpn: VirtPageNum = start_va.floor();
         let end_vpn: VirtPageNum = end_va.ceil();
-        info!("start_vpn: {:?}, end_vpn: {:?}", start_vpn, end_vpn);
+        info!(
+            "map area new: start_vpn: {:?}, end_vpn: {:?}",
+            start_vpn, end_vpn
+        );
         Self {
             vpn_range: VPNRange::new(start_vpn, end_vpn),
             data_frames: BTreeMap::new(),
@@ -222,6 +315,29 @@ impl MapArea {
         }
     }
 
+    /// 插入页表项
+    pub fn map_one(&mut self, page_table: &mut PageTable, vpn: VirtPageNum) {
+        let ppn: PhysPageNum;
+        match self.map_type {
+            MapType::Identical => {
+                ppn = PhysPageNum(vpn.0);
+            }
+            MapType::Framed => {
+                let frame = frame_alloc().unwrap();
+                ppn = frame.ppn;
+                self.data_frames.insert(vpn, frame);
+            }
+        }
+        let pte_flags = PTEFlags::from_bits(self.map_perm.bits).unwrap();
+        page_table.map(vpn, ppn, pte_flags);
+    }
+
+    pub fn unmap_one(&mut self, page_table: &mut PageTable, vpn: VirtPageNum) {
+        if self.map_type == MapType::Framed {
+            self.data_frames.remove(&vpn);
+        }
+        page_table.unmap(vpn);
+    }
     pub fn map(&mut self, page_table: &mut PageTable) {
         for vpn in self.vpn_range {
             self.map_one(page_table, vpn);
@@ -254,36 +370,18 @@ impl MapArea {
             current_vpn.step();
         }
     }
-
-    /// 插入页表项
-    pub fn map_one(&mut self, page_table: &mut PageTable, vpn: VirtPageNum) {
-        let ppn: PhysPageNum;
-        match self.map_type {
-            MapType::Identical => {
-                ppn = PhysPageNum(vpn.0);
-            }
-            MapType::Framed => {
-                let frame = frame_alloc().unwrap();
-                ppn = frame.ppn;
-                self.data_frames.insert(vpn, frame);
-            }
-        }
-        let pte_flags = PTEFlags::from_bits(self.map_perm.bits).unwrap();
-        page_table.map(vpn, ppn, pte_flags);
-    }
-
-    pub fn unmap_one(&mut self, page_table: &mut PageTable, vpn: VirtPageNum) {
-        if self.map_type == MapType::Framed {
-            self.data_frames.remove(&vpn);
-        }
-        page_table.unmap(vpn);
-    }
 }
 
 pub fn map_area_test() {
+    return;
     debug!("map_area_test start");
-    let mut ma = MapArea::new(0x0000.into(), 0x2001.into(), MapType::Framed, MapPermission::R);
-    let mut pt  = PageTable::new();
+    let mut ma = MapArea::new(
+        0x0000.into(),
+        0x2001.into(),
+        MapType::Framed,
+        MapPermission::R,
+    );
+    let mut pt = PageTable::new();
     info!("root_ppn: {:?}", pt.root_ppn);
     ma.map(&mut pt);
     debug!("map_area_test passed!");
