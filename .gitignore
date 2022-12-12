@@ -4,3 +4,4 @@ os/Cargo.lock
 os/src/link_app.S
 user/target
 user/Cargo.lock
+user/build
