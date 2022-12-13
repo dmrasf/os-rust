@@ -24,16 +24,20 @@ OBJCOPY := rust-objcopy --binary-architecture=riscv64
 # Disassembly
 DISASM ?= -x
 
+TEST ?= 0
+
 build: $(KERNEL_BIN)
 
 $(KERNEL_BIN): kernel
 	@$(OBJCOPY) $(KERNEL_ELF) --strip-all -O binary $@
 
 kernel:
+	@cd ../user && make build TEST=$(TEST)
 	@echo Platform: $(BOARD)
 	@cargo build $(MODE_ARG) --features "board_$(BOARD)"
 
 clean:
+	@cd ../user && make clean
 	@cargo clean
 
 disasm: kernel

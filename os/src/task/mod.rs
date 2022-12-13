@@ -4,6 +4,7 @@ mod task;
 
 use self::switch::__switch;
 use crate::loader::get_app_data;
+use crate::mm::{MapPermission, MemorySet, VirtAddr};
 use crate::trap::context::TrapContext;
 use crate::{loader::get_num_app, sync::UPSafeCell};
 use alloc::vec::Vec;
@@ -47,14 +48,34 @@ impl TaskManager {
     fn mark_current_suspended(&self) {
         let mut inner = self.inner.exclusive_access();
         let current = inner.current_task;
-        info!("task_{} -> ready", current);
+        debug!("task_{} -> ready\n", current);
         inner.tasks[current].task_status = TaskStatus::Ready;
+    }
+
+    fn get_current_task(&self) -> usize {
+        self.inner.exclusive_access().current_task
+    }
+
+    fn mmap(&self, start_va: VirtAddr, end_va: VirtAddr, permission: MapPermission) {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current]
+            .memory_set
+            .insert_framed_area(start_va, end_va, permission);
+    }
+
+    fn unmap(&self, start_va: VirtAddr, end_va: VirtAddr) {
+        let mut inner = self.inner.exclusive_access();
+        let current = inner.current_task;
+        inner.tasks[current]
+            .memory_set
+            .remove_framed_area(start_va, end_va);
     }
 
     fn mark_current_exited(&self) {
         let mut inner = self.inner.exclusive_access();
         let current = inner.current_task;
-        info!("task_{} -> exit", current);
+        debug!("task_{} -> exit\n", current);
         inner.tasks[current].task_status = TaskStatus::Exited;
     }
 
@@ -74,7 +95,7 @@ impl TaskManager {
             let current = inner.current_task;
             inner.tasks[next].task_status = TaskStatus::Running;
             inner.current_task = next;
-            info!("task_{} to task_{}", current, next);
+            debug!("task_{} -> task_{}", current, next);
             let current_task_cx_ptr = &mut inner.tasks[current].task_cx as *mut TaskContext;
             let next_task_cx_ptr = &inner.tasks[next].task_cx as *const TaskContext;
             drop(inner);
@@ -146,4 +167,16 @@ pub fn current_user_token() -> usize {
 
 pub fn current_trap_cx() -> &'static mut TrapContext {
     TASK_MANAGER.get_current_trap_cx()
+}
+
+pub fn current_task() -> usize {
+    TASK_MANAGER.get_current_task()
+}
+
+pub fn task_mmap(start_va: VirtAddr, end_va: VirtAddr, permission: MapPermission) {
+    TASK_MANAGER.mmap(start_va, end_va, permission);
+}
+
+pub fn task_unmap(start_va: VirtAddr, end_va: VirtAddr) {
+    TASK_MANAGER.unmap(start_va, end_va);
 }

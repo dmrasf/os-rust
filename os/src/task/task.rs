@@ -31,6 +31,15 @@ impl TaskControlBlock {
         self.memory_set.token()
     }
 
+    pub fn mmap(&mut self, start_va: VirtAddr, end_va: VirtAddr, permission: MapPermission) {
+        self.memory_set
+            .insert_framed_area(start_va, end_va, permission);
+    }
+
+    pub fn unmap(&mut self, start_va: VirtAddr, end_va: VirtAddr) {
+        self.memory_set.remove_framed_area(start_va, end_va);
+    }
+
     pub fn new(elf_data: &[u8], app_id: usize) -> Self {
         println!("app_{} init", app_id);
         let (memory_set, user_sp, entry_point) = MemorySet::from_elf(elf_data);

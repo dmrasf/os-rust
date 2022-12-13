@@ -90,6 +90,11 @@ impl MemorySet {
         self.page_table.token()
     }
 
+    pub fn remove_framed_area(&mut self, start_va: VirtAddr, end_va: VirtAddr) {
+        let mut ma = MapArea::new(start_va, end_va, MapType::Framed, MapPermission::empty());
+        ma.unmap(&mut self.page_table);
+    }
+
     pub fn insert_framed_area(
         &mut self,
         start_va: VirtAddr,
@@ -285,7 +290,7 @@ impl MemorySet {
 /// 描述一段连续地址的虚拟内存
 pub struct MapArea {
     /// 虚拟页号的连续区间
-    vpn_range: VPNRange,
+    pub vpn_range: VPNRange,
     /// 虚拟页号与物理页号的映射
     data_frames: BTreeMap<VirtPageNum, FrameTracker>,
     /// 映射类型
@@ -303,10 +308,10 @@ impl MapArea {
     ) -> Self {
         let start_vpn: VirtPageNum = start_va.floor();
         let end_vpn: VirtPageNum = end_va.ceil();
-        info!(
-            "map area new: start_vpn: {:?}, end_vpn: {:?}",
-            start_vpn, end_vpn
-        );
+        // info!(
+        //     "map area new: start_vpn: {:?}, end_vpn: {:?}; {:?}",
+        //     start_vpn, end_vpn, map_perm
+        // );
         Self {
             vpn_range: VPNRange::new(start_vpn, end_vpn),
             data_frames: BTreeMap::new(),
