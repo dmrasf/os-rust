@@ -1,14 +1,13 @@
 use crate::config::PAGE_SIZE;
 use crate::mm::MapPermission;
-use crate::task::*;
-use crate::{
-    mm::{translated_byte_buffer, MapArea, MapType, PageTable, VirtAddr},
-    task::{current_user_token, TASK_MANAGER},
-};
+use crate::sbi::console_getchar;
+use crate::{console, task::*};
+use crate::{mm::*, task::*};
 use bitflags::bitflags;
 use core::arch::asm;
 
 const FD_STDOUT: usize = 1;
+const FD_STDIN: usize = 0;
 
 /// write buf of length `len`  to a file with `fd`
 pub fn sys_write(fd: usize, buf: *const u8, len: usize) -> isize {
@@ -87,8 +86,30 @@ pub fn sys_close(fd: usize) -> isize {
     0
 }
 
-pub fn sys_read(fd: usize, buffer: &mut [u8]) -> isize {
-    0
+pub fn sys_read(fd: usize, buf: *const u8, len: usize) -> isize {
+    match fd {
+        FD_STDIN => {
+            let mut c: usize;
+            loop {
+                c = console_getchar();
+                if c == 0 {
+                    suspend_current_and_run_next();
+                    continue;
+                } else {
+                    break;
+                }
+            }
+            let ch = c as u8;
+            let mut buffers = translated_byte_buffer(current_user_token(), buf, len);
+            unsafe {
+                buffers[0].as_mut_ptr().write_volatile(ch);
+            }
+            1
+        }
+        _ => {
+            panic!("Unsupported fd in sys_read!");
+        }
+    }
 }
 
 pub fn sys_linkat(
@@ -146,7 +167,11 @@ pub fn sys_mmap(start: usize, len: usize, prot: usize) -> isize {
             }
         }
     }
-    task_mmap(start.into(), (start + len).into(), mp);
+    let processor = PROCESSOR.exclusive_access();
+    processor
+        .current()
+        .unwrap()
+        .mmap(start.into(), (start + len).into(), mp);
     for vpn in ma.vpn_range {
         if let Some(pte) = pt.translate(vpn) {
             println!("{:?}: {:?}, {:?}", vpn, pte.ppn(), pte.flags());
@@ -175,7 +200,11 @@ pub fn sys_munmap(start: usize, len: usize) -> isize {
             return -1;
         }
     }
-    task_unmap(start.into(), (start + len).into());
+    let processor = PROCESSOR.exclusive_access();
+    processor
+        .current()
+        .unwrap()
+        .munmap(start.into(), (start + len).into());
     0
 }
 

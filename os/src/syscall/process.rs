@@ -1,12 +1,7 @@
-use core::borrow::BorrowMut;
-
-use crate::{
-    mm::{
-        MapArea, MapPermission, MapType, PageTable, PhysAddr, VirtAddr, VirtPageNum, KERNEL_SPACE,
-    },
-    task::{current_user_token, exit_current_and_run_next, suspend_current_and_run_next},
-    timer::get_time_us,
-};
+use crate::loader::get_app_data_by_name;
+use crate::task::manager::*;
+use crate::{mm::*, task::*, timer::get_time_ms};
+use alloc::sync::Arc;
 
 #[repr(C)]
 #[derive(Debug, Default)]
@@ -24,7 +19,7 @@ impl TimeVal {
 /// task exits and submit an exit code
 pub fn sys_exit(exit_code: i32) -> ! {
     kernel!("Application exited with code {}", exit_code);
-    exit_current_and_run_next();
+    exit_current_and_run_next(exit_code);
     panic!("Unreachable in sys_exit!");
 }
 
@@ -33,38 +28,60 @@ pub fn sys_yield() -> isize {
     0
 }
 
-pub fn sys_get_time(time: usize, tz: usize) -> isize {
-    let mut pt = PageTable::from_token(current_user_token());
-    let pa = VirtAddr::from(time);
-    let page_offset = pa.page_offset();
-    let vpn = VirtPageNum::from(pa.floor());
-    if let Some(pte) = pt.translate(vpn) {
-        let timeval_phyaddr: usize = PhysAddr::from(pte.ppn()).0 + page_offset;
-        unsafe {
-            let t = &mut *(timeval_phyaddr as *mut TimeVal);
-            let current_time = get_time_us();
-            t.sec = current_time / 1_000_000;
-            t.usec = current_time - t.sec * 1_000_000;
-        }
-    } else {
-        panic!("not found physical addr");
-    }
-    0
+pub fn sys_get_time() -> isize {
+    get_time_ms() as isize
 }
+
 pub fn sys_getpid() -> isize {
-    0
+    current_task().unwrap().pid.0 as isize
 }
 
 pub fn sys_fork() -> isize {
-    0
+    let current_task = current_task().unwrap();
+    let new_task = current_task.fork();
+    let new_pid = new_task.pid.0;
+    let trap_cx = new_task.inner_exclusive_access().get_trap_cx();
+    trap_cx.x[10] = 0;
+    add_task(new_task);
+    new_pid as isize
 }
 
-pub fn sys_exec(path: &str) -> isize {
-    0
+pub fn sys_exec(path: *const u8) -> isize {
+    let token = current_user_token();
+    let path = translated_str(token, path);
+    if let Some(data) = get_app_data_by_name(path.as_str()) {
+        let task = current_task().unwrap();
+        task.exec(data);
+        0
+    } else {
+        -1
+    }
 }
 
 pub fn sys_waitpid(pid: isize, xstatus: *mut i32) -> isize {
-    0
+    let task = current_task().unwrap();
+    let mut inner = task.inner_exclusive_access();
+    if inner
+        .children
+        .iter()
+        .find(|p| pid == -1 || pid as usize == p.getpid())
+        .is_none()
+    {
+        return -1;
+    }
+    let pair = inner.children.iter().enumerate().find(|(_, p)| {
+        p.inner_exclusive_access().is_zombie() && (pid == -1 || pid as usize == p.getpid())
+    });
+    if let Some((idx, _)) = pair {
+        let child = inner.children.remove(idx);
+        assert_eq!(Arc::strong_count(&child), 1);
+        let fonud_pid = child.getpid();
+        let exit_code = child.inner_exclusive_access().exit_code;
+        *translated_refmut(inner.memory_set.token(), xstatus) = exit_code;
+        fonud_pid as isize
+    } else {
+        -2
+    }
 }
 
 pub fn sys_set_priority(prio: isize) -> isize {

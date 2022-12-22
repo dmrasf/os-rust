@@ -47,7 +47,6 @@ bitflags! {
 }
 
 pub fn remap_test() {
-    trace!("remap_test");
     let mut kernel_space = KERNEL_SPACE.exclusive_access();
     let mid_text: VirtAddr = ((stext as usize + etext as usize) / 2).into();
     let mid_rodata: VirtAddr = ((srodata as usize + erodata as usize) / 2).into();
@@ -67,7 +66,7 @@ pub fn remap_test() {
         .translate(mid_data.floor())
         .unwrap()
         .executable());
-    println!("remap_test passed!");
+    info!("remap_test done!");
 }
 
 /// 地址空间不一定连续的逻辑段
@@ -86,6 +85,10 @@ impl MemorySet {
         }
     }
 
+    pub fn recycle_data_pages(&mut self) {
+        self.areas.clear();
+    }
+
     pub fn token(&self) -> usize {
         self.page_table.token()
     }
@@ -93,6 +96,18 @@ impl MemorySet {
     pub fn remove_framed_area(&mut self, start_va: VirtAddr, end_va: VirtAddr) {
         let mut ma = MapArea::new(start_va, end_va, MapType::Framed, MapPermission::empty());
         ma.unmap(&mut self.page_table);
+    }
+
+    pub fn remove_area_with_start_vpn(&mut self, start_vpn: VirtPageNum) {
+        if let Some((idx, area)) = self
+            .areas
+            .iter_mut()
+            .enumerate()
+            .find(|(_, area)| area.vpn_range.get_start() == start_vpn)
+        {
+            area.unmap(&mut self.page_table);
+            self.areas.remove(idx);
+        }
     }
 
     pub fn insert_framed_area(
@@ -128,10 +143,10 @@ impl MemorySet {
 
     /// 使用identical方式映射，开启页表或关闭页表得到的物理内存相同，内核位于低256GB
     pub fn new_kernel() -> Self {
-        trace!("new_kernel");
+        info!("mapping kernel");
         let mut memory_set = Self::new_bare();
         memory_set.map_trampoline();
-        println!("mapping .text section");
+        // println!("mapping .text section");
         memory_set.push(
             MapArea::new(
                 (stext as usize).into(),
@@ -141,7 +156,7 @@ impl MemorySet {
             ),
             None,
         );
-        println!("mapping .rodata section");
+        // println!("mapping .rodata section");
         memory_set.push(
             MapArea::new(
                 (srodata as usize).into(),
@@ -151,7 +166,7 @@ impl MemorySet {
             ),
             None,
         );
-        println!("mapping .data section");
+        // println!("mapping .data section");
         memory_set.push(
             MapArea::new(
                 (sdata as usize).into(),
@@ -161,7 +176,7 @@ impl MemorySet {
             ),
             None,
         );
-        println!("mapping .bss section");
+        // println!("mapping .bss section");
         memory_set.push(
             MapArea::new(
                 (sbss_with_stack as usize).into(),
@@ -171,7 +186,7 @@ impl MemorySet {
             ),
             None,
         );
-        println!("mapping physical memory");
+        // println!("mapping physical memory");
         memory_set.push(
             MapArea::new(
                 (ekernel as usize).into(),
@@ -181,7 +196,7 @@ impl MemorySet {
             ),
             None,
         );
-        println!("mapping memory-mapped registers");
+        // println!("mapping memory-mapped registers");
         for pair in MMIO {
             memory_set.push(
                 MapArea::new(
@@ -235,11 +250,11 @@ impl MemorySet {
         // guard page
         user_stack_bottom += PAGE_SIZE;
         let user_stack_top = user_stack_bottom + USER_STACK_SIZE;
-        println!(
-            "map user stack: top={:?}, bottom={:?}",
-            VirtAddr::from(user_stack_top),
-            VirtAddr::from(user_stack_bottom)
-        );
+        // println!(
+        //     "map user stack: top={:?}, bottom={:?}",
+        //     VirtAddr::from(user_stack_top),
+        //     VirtAddr::from(user_stack_bottom)
+        // );
         memory_set.push(
             MapArea::new(
                 user_stack_bottom.into(),
@@ -250,11 +265,11 @@ impl MemorySet {
             None,
         );
         // map TrapContext
-        println!(
-            "map TrapContext: start={:?}, end={:?}",
-            VirtAddr::from(TRAP_CONTEXT),
-            VirtAddr::from(TRAMPOLINE)
-        );
+        // println!(
+        //     "map TrapContext: start={:?}, end={:?}",
+        //     VirtAddr::from(TRAP_CONTEXT),
+        //     VirtAddr::from(TRAMPOLINE)
+        // );
         memory_set.push(
             MapArea::new(
                 TRAP_CONTEXT.into(),
@@ -273,17 +288,34 @@ impl MemorySet {
 
     /// 开启页表
     pub fn activate(&self) {
-        trace!("memory_set active");
         let satp = self.page_table.token();
         unsafe {
             satp::write(satp);
             /// 清除过期快表
             asm!("sfence.vma");
         }
+        info!("Sv39 active");
     }
 
     pub fn translate(&self, vpn: VirtPageNum) -> Option<PageTableEntry> {
         self.page_table.translate(vpn)
+    }
+
+    pub fn from_existed_user(user_space: &MemorySet) -> MemorySet {
+        let mut memory_set = Self::new_bare();
+        memory_set.map_trampoline();
+        for area in user_space.areas.iter() {
+            let new_area = MapArea::from_another(area);
+            memory_set.push(new_area, None);
+            for vpn in area.vpn_range {
+                let src_ppn = user_space.translate(vpn).unwrap().ppn();
+                let dst_ppn = memory_set.translate(vpn).unwrap().ppn();
+                dst_ppn
+                    .get_bytes_array()
+                    .copy_from_slice(src_ppn.get_bytes_array());
+            }
+        }
+        memory_set
     }
 }
 
@@ -328,7 +360,7 @@ impl MapArea {
                 ppn = PhysPageNum(vpn.0);
             }
             MapType::Framed => {
-                let frame = frame_alloc().unwrap();
+                let frame = frame_alloc().expect("physical frame none!");
                 ppn = frame.ppn;
                 self.data_frames.insert(vpn, frame);
             }
@@ -373,6 +405,15 @@ impl MapArea {
                 break;
             }
             current_vpn.step();
+        }
+    }
+
+    pub fn from_another(another: &MapArea) -> Self {
+        Self {
+            vpn_range: VPNRange::new(another.vpn_range.get_start(), another.vpn_range.get_end()),
+            data_frames: BTreeMap::new(),
+            map_type: another.map_type,
+            map_perm: another.map_perm,
         }
     }
 }
