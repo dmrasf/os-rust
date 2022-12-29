@@ -1,5 +1,4 @@
 use crate::fs::{open_file, OpenFlags};
-use crate::loader::get_app_data_by_name;
 use crate::task::manager::*;
 use crate::{mm::*, task::*, timer::get_time_ms};
 use alloc::sync::Arc;

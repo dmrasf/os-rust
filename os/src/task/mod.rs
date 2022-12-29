@@ -11,10 +11,7 @@ use self::{
     processor::{schedule, task_current_task},
     task::{TaskControlBlock, TaskStatus},
 };
-use crate::{
-    fs::{open_file, OpenFlags},
-    loader::get_app_data_by_name,
-};
+use crate::fs::{open_file, OpenFlags};
 use alloc::sync::Arc;
 use lazy_static::lazy_static;
 
