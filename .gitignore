@@ -1,7 +1,15 @@
 .vscode
+
 os/target
 os/Cargo.lock
 os/src/link_app.S
+
 user/target
 user/Cargo.lock
 user/build
+
+easy-fs/target
+easy-fs/Cargo.lock
+
+easy-fs-fuse/target
+easy-fs-fuse/Cargo.lock
