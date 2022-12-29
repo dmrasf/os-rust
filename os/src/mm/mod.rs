@@ -5,6 +5,7 @@ mod memory_set;
 mod page_table;
 
 pub use address::*;
+pub use frame_allocator::*;
 pub use memory_set::*;
 pub use page_table::*;
 

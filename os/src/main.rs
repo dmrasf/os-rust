@@ -7,6 +7,8 @@
 mod console;
 mod board;
 mod config;
+mod drivers;
+mod fs;
 mod lang_items;
 mod loader;
 mod mm;
@@ -28,11 +30,11 @@ pub fn rust_main() {
     clear_bss();
     mm::init();
     mm::remap_test();
-    task::add_initproc();
     trap::init();
     trap::enable_timer_interrupt();
     timer::set_next_trigger();
-    loader::list_apps();
+    fs::list_apps();
+    task::add_initproc();
     task::run_tasks();
     panic!("Unreachable in rust_main!");
 }

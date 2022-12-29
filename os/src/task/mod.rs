@@ -11,7 +11,10 @@ use self::{
     processor::{schedule, task_current_task},
     task::{TaskControlBlock, TaskStatus},
 };
-use crate::loader::get_app_data_by_name;
+use crate::{
+    fs::{open_file, OpenFlags},
+    loader::get_app_data_by_name,
+};
 use alloc::sync::Arc;
 use lazy_static::lazy_static;
 
@@ -19,9 +22,11 @@ pub use processor::*;
 
 lazy_static! {
     /// 初始进程
-    pub static ref INITPROC: Arc<TaskControlBlock> = Arc::new(TaskControlBlock::new(
-        get_app_data_by_name("initproc").unwrap()
-    ));
+    pub static ref INITPROC: Arc<TaskControlBlock> = Arc::new({
+        let inode = open_file("initproc", OpenFlags::RDONLY).unwrap();
+        let v = inode.read_all();
+        TaskControlBlock::new(v.as_slice())
+    });
 }
 
 /// 加载初始进程

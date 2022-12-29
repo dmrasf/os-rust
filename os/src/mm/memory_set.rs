@@ -29,6 +29,10 @@ lazy_static! {
         Arc::new(unsafe { UPSafeCell::new(MemorySet::new_kernel()) });
 }
 
+pub fn kernel_token() -> usize {
+    KERNEL_SPACE.exclusive_access().token()
+}
+
 #[derive(Copy, Clone, PartialEq, Debug)]
 pub enum MapType {
     /// 使用多级页表映射
