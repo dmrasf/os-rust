@@ -1,8 +1,10 @@
 mod inode;
+mod pipe;
 mod stdio;
 
 use crate::mm::UserBuffer;
 pub use inode::*;
+pub use pipe::*;
 pub use stdio::{Stdin, Stdout};
 
 pub trait File: Send + Sync {
