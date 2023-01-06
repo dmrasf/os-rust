@@ -2,6 +2,7 @@
 #![no_main]
 #![allow(unused)]
 #![feature(alloc_error_handler)]
+#![feature(panic_info_message)]
 
 #[macro_use]
 mod console;

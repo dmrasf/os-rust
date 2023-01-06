@@ -5,6 +5,7 @@ KERNEL_BIN := $(KERNEL_ELF).bin
 DISASM_TMP := target/$(TARGET)/$(MODE)/asm
 FS_IMG := ../user/target/$(TARGET)/$(MODE)/fs.img
 QEMU_PATH := qemu-system-riscv64
+APPS := ../user/src/bin/*
 
 # Building mode argument
 ifeq ($(MODE), release)
@@ -26,20 +27,26 @@ OBJCOPY := rust-objcopy --binary-architecture=riscv64
 # Disassembly
 DISASM ?= -x
 
-TEST ?= 0
+# Run usertests or usershell
+TEST ?=
 
-build: $(KERNEL_BIN)
+build: $(KERNEL_BIN) fs-img 
 
 $(KERNEL_BIN): kernel
 	@$(OBJCOPY) $(KERNEL_ELF) --strip-all -O binary $@
 
-kernel:
+fs-img: $(APPS)
 	@cd ../user && make build TEST=$(TEST)
+	@rm -f $(FS_IMG)
+	@cd ../easy-fs-fuse && cargo run --release -- -s ../user/src/bin/ -t ../user/target/riscv64gc-unknown-none-elf/release/
+
+$(APPS):
+
+kernel:
 	@echo Platform: $(BOARD)
 	@cargo build $(MODE_ARG) --features "board_$(BOARD)"
 
 clean:
-	@cd ../user && make clean
 	@cargo clean
 
 disasm: kernel
@@ -73,4 +80,4 @@ gdbserver: build
 gdbclient:
 	@riscv64-elf-gdb -ex 'file $(KERNEL_ELF)' -ex 'set arch riscv:rv64' -ex 'target remote localhost:1234'
 
-.PHONY: build kernel clean disasm disasm-vim run-inner gdbserver gdbclient
+.PHONY: build kernel clean disasm disasm-vim run-inner fs-img gdbserver gdbclient
