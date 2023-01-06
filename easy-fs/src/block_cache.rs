@@ -1,6 +1,8 @@
 use crate::{block_dev::BlockDevice, BLOCK_SZ};
 use alloc::collections::VecDeque;
 use alloc::sync::Arc;
+use alloc::vec;
+use alloc::vec::Vec;
 use lazy_static::lazy_static;
 use spin::Mutex;
 
@@ -66,7 +68,7 @@ impl BlockCacheManager {
 
 pub struct BlockCache {
     /// 块缓存区，在真正写入磁盘前实际操作的地方
-    cache: [u8; BLOCK_SZ],
+    cache: Vec<u8>,
     block_id: usize,
     /// 该缓存区表示的实际磁盘块
     block_device: Arc<dyn BlockDevice>,
@@ -77,7 +79,7 @@ pub struct BlockCache {
 impl BlockCache {
     /// 从磁盘加载一块内存到缓冲区
     pub fn new(block_id: usize, block_device: Arc<dyn BlockDevice>) -> Self {
-        let mut cache = [0u8; BLOCK_SZ];
+        let mut cache = vec![0u8; BLOCK_SZ];
         block_device.read_block(block_id, &mut cache);
         Self {
             cache,
@@ -91,7 +93,7 @@ impl BlockCache {
         f(self.get_ref(offset))
     }
 
-    pub fn modify<T, V>(&self, offset: usize, f: impl FnOnce(&mut T) -> V) -> V {
+    pub fn modify<T, V>(&mut self, offset: usize, f: impl FnOnce(&mut T) -> V) -> V {
         f(self.get_mut(offset))
     }
 
@@ -112,12 +114,13 @@ impl BlockCache {
     }
 
     /// 获取缓冲区指定偏移量类型为T的可变引用
-    pub fn get_mut<T>(&self, offset: usize) -> &mut T
+    pub fn get_mut<T>(&mut self, offset: usize) -> &mut T
     where
         T: Sized,
     {
         let type_size = core::mem::size_of::<T>();
         assert!(offset + type_size <= BLOCK_SZ);
+        self.modified = true;
         let addr = self.addr_of_offset(offset);
         unsafe { &mut *(addr as *mut T) }
     }

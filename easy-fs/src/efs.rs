@@ -1,6 +1,6 @@
 use crate::{
     bitmap::Bitmap,
-    block_cache::{get_block_cache, block_cache_sync_all},
+    block_cache::{block_cache_sync_all, get_block_cache},
     block_dev::BlockDevice,
     layout::{DiskInode, DiskInodeType, SuperBlock},
     vfs::Inode,
