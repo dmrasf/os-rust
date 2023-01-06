@@ -1,6 +1,9 @@
 use super::task::TaskControlBlock;
 use crate::sync::UPSafeCell;
-use alloc::{collections::VecDeque, sync::Arc};
+use alloc::{
+    collections::{BTreeMap, VecDeque},
+    sync::Arc,
+};
 use lazy_static::lazy_static;
 
 pub struct TaskManager {
@@ -27,6 +30,8 @@ impl TaskManager {
 lazy_static! {
     pub static ref TASK_MANAGER: UPSafeCell<TaskManager> =
         unsafe { UPSafeCell::new(TaskManager::new()) };
+    pub static ref PID2TCB: UPSafeCell<BTreeMap<usize, Arc<TaskControlBlock>>> =
+        unsafe { UPSafeCell::new(BTreeMap::new()) };
 }
 
 pub fn fetch_task() -> Option<Arc<TaskControlBlock>> {
@@ -34,5 +39,20 @@ pub fn fetch_task() -> Option<Arc<TaskControlBlock>> {
 }
 
 pub fn add_task(task: Arc<TaskControlBlock>) {
+    PID2TCB
+        .exclusive_access()
+        .insert(task.getpid(), Arc::clone(&task));
     TASK_MANAGER.exclusive_access().add(task);
+}
+
+pub fn pid2task(pid: usize) -> Option<Arc<TaskControlBlock>> {
+    let map = PID2TCB.exclusive_access();
+    map.get(&pid).map(Arc::clone)
+}
+
+pub fn remove_from_pid2task(pid: usize) {
+    let mut map = PID2TCB.exclusive_access();
+    if map.remove(&pid).is_none() {
+        panic!("cannot find pid {} in pid2task!", pid);
+    }
 }

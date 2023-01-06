@@ -1,5 +1,7 @@
+use super::action::SignalActions;
 use super::context::TaskContext;
 use super::pid::{kernel_stack_position, pid_alloc, KernelStack, PidHandle};
+use super::signal::SignalFlags;
 use crate::config::TRAP_CONTEXT;
 use crate::fs::*;
 use crate::mm::*;
@@ -42,6 +44,14 @@ pub struct TaskControlBlockInner {
     pub exit_code: i32,
     /// 文件描述符表
     pub fd_table: Vec<Option<Arc<dyn File + Send + Sync>>>,
+    pub signals: SignalFlags,
+    /// 信号掩码
+    pub signal_mask: SignalFlags,
+    pub handling_sig: isize,
+    pub signal_actions: SignalActions,
+    pub killed: bool,
+    pub frozen: bool,
+    pub trap_ctx_backup: Option<TrapContext>,
 }
 
 impl TaskControlBlockInner {
@@ -161,6 +171,13 @@ impl TaskControlBlock {
                     children: Vec::new(),
                     exit_code: 0,
                     fd_table: new_fd_table,
+                    signals: SignalFlags::empty(),
+                    signal_mask: parent_inner.signal_mask,
+                    handling_sig: -1,
+                    signal_actions: parent_inner.signal_actions.clone(),
+                    killed: false,
+                    frozen: false,
+                    trap_ctx_backup: None,
                 })
             },
         });
@@ -214,6 +231,13 @@ impl TaskControlBlock {
                         // 2 -> stderr
                         Some(Arc::new(Stdout)),
                     ],
+                    signals: SignalFlags::empty(),
+                    signal_mask: SignalFlags::empty(),
+                    handling_sig: -1,
+                    signal_actions: SignalActions::default(),
+                    killed: false,
+                    frozen: false,
+                    trap_ctx_backup: None,
                 })
             },
         };

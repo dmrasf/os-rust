@@ -10,6 +10,9 @@ const SYSCALL_EXIT: usize = 93;
 const SYSCALL_SLEEP: usize = 101;
 const SYSCALL_YIELD: usize = 124;
 const SYSCALL_KILL: usize = 129;
+const SYSCALL_SIGACTION: usize = 134;
+const SYSCALL_SIGPROCMASK: usize = 135;
+const SYSCALL_SIGRETURN: usize = 139;
 const SYSCALL_GET_TIME: usize = 169;
 const SYSCALL_GETPID: usize = 172;
 const SYSCALL_MUNMAP: usize = 215;
@@ -40,7 +43,7 @@ const SYSCALL_CREATE_DESKTOP: usize = 2000;
 mod fs;
 mod process;
 
-use crate::sync::UPSafeCell;
+use crate::{sync::UPSafeCell, task::SignalAction};
 use core::arch::asm;
 use fs::*;
 use lazy_static::*;
@@ -67,6 +70,14 @@ pub fn syscall(syscall_id: usize, args: [usize; 3]) -> isize {
         SYSCALL_WAITPID => sys_waitpid(args[0] as isize, args[1] as *mut i32),
         SYSCALL_MMAP => sys_mmap(args[0], args[1], args[2]),
         SYSCALL_MUNMAP => sys_munmap(args[0], args[1]),
+        SYSCALL_KILL => sys_kill(args[0], args[1] as i32),
+        SYSCALL_SIGACTION => sys_sigaction(
+            args[0] as i32,
+            args[1] as *const SignalAction,
+            args[2] as *mut SignalAction,
+        ),
+        SYSCALL_SIGPROCMASK => sys_sigprocmask(args[0] as u32),
+        SYSCALL_SIGRETURN => sys_sigreturn(),
         _ => panic!("Unsupported syscall_id: {}", syscall_id),
     }
 }

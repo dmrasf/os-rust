@@ -76,12 +76,12 @@ pub fn trap_handler(cx: &mut TrapContext) -> ! {
         | Trap::Exception(Exception::StorePageFault)
         | Trap::Exception(Exception::LoadFault)
         | Trap::Exception(Exception::LoadPageFault) => {
-            error!("PageFault in application, bad addr = {:#x}, bad instruction = {:#x}, kernel killed it.", stval, cx.sepc);
-            exit_current_and_run_next(-2);
+            // error!("PageFault in application, bad addr = {:#x}, bad instruction = {:#x}, kernel killed it.", stval, cx.sepc);
+            current_add_signal(SignalFlags::SIGSEGV);
         }
         Trap::Exception(Exception::IllegalInstruction) => {
-            error!("IllegalInstruction in application, kernel killed it.");
-            exit_current_and_run_next(-3);
+            // error!("IllegalInstruction in application, kernel killed it.");
+            current_add_signal(SignalFlags::SIGILL);
         }
         Trap::Interrupt(Interrupt::SupervisorTimer) => {
             set_next_trigger();
@@ -95,6 +95,14 @@ pub fn trap_handler(cx: &mut TrapContext) -> ! {
             );
         }
     }
+    // 信号处理
+    handle_signals();
+    // check error signals (if error then exit)
+    if let Some((errno, msg)) = check_signals_error_of_current() {
+        kernel!("{}", msg);
+        exit_current_and_run_next(errno);
+    }
+
     trap_return();
 }
 
