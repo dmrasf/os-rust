@@ -150,11 +150,11 @@ pub fn sys_fstat(fd: usize, st: &Stat) -> isize {
     0
 }
 
-pub fn sys_mail_read(buffer: &mut [u8]) -> isize {
+pub fn sys_mail_read(buffer: *mut u8, len: usize) -> isize {
     0
 }
 
-pub fn sys_mail_write(pid: usize, buffer: &[u8]) -> isize {
+pub fn sys_mail_write(pid: usize, buffer: *const u8, len: usize) -> isize {
     0
 }
 

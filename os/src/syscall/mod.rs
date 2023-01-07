@@ -78,6 +78,8 @@ pub fn syscall(syscall_id: usize, args: [usize; 3]) -> isize {
         ),
         SYSCALL_SIGPROCMASK => sys_sigprocmask(args[0] as u32),
         SYSCALL_SIGRETURN => sys_sigreturn(),
+        SYSCALL_MAIL_READ => sys_mail_read(args[0] as *mut u8, args[1]),
+        SYSCALL_MAIL_WRITE => sys_mail_write(args[0], args[1] as *const u8, args[2]),
         _ => panic!("Unsupported syscall_id: {}", syscall_id),
     }
 }
