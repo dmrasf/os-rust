@@ -1,5 +1,6 @@
-use crate::config::{TRAMPOLINE, TRAP_CONTEXT};
+use crate::config::TRAMPOLINE;
 use crate::task::*;
+use crate::timer::check_timer;
 use crate::{syscall::syscall, timer::set_next_trigger};
 use context::TrapContext;
 use core::arch::asm;
@@ -37,30 +38,7 @@ pub fn enable_timer_interrupt() {
 }
 
 #[no_mangle]
-pub fn trap_return() -> ! {
-    set_user_trap_entry();
-    let trap_cx_ptr = TRAP_CONTEXT;
-    let user_satp = current_user_token();
-    extern "C" {
-        fn __alltraps();
-        fn __restore();
-    }
-    let restore_va = __restore as usize - __alltraps as usize + TRAMPOLINE;
-    unsafe {
-        asm!(
-            "fence.i",
-            "jr {restore_va}",
-            restore_va = in(reg) restore_va,
-            in("a0") trap_cx_ptr,
-            in("a1") user_satp,
-            options(noreturn)
-        );
-    }
-    panic!("Unreachable in back_to_user!");
-}
-
-#[no_mangle]
-pub fn trap_handler(cx: &mut TrapContext) -> ! {
+pub fn trap_handler(_cx: &mut TrapContext) -> ! {
     set_kernel_trap_entry();
     let scause = scause::read();
     let stval = stval::read();
@@ -76,15 +54,14 @@ pub fn trap_handler(cx: &mut TrapContext) -> ! {
         | Trap::Exception(Exception::StorePageFault)
         | Trap::Exception(Exception::LoadFault)
         | Trap::Exception(Exception::LoadPageFault) => {
-            // error!("PageFault in application, bad addr = {:#x}, bad instruction = {:#x}, kernel killed it.", stval, cx.sepc);
             current_add_signal(SignalFlags::SIGSEGV);
         }
         Trap::Exception(Exception::IllegalInstruction) => {
-            // error!("IllegalInstruction in application, kernel killed it.");
             current_add_signal(SignalFlags::SIGILL);
         }
         Trap::Interrupt(Interrupt::SupervisorTimer) => {
             set_next_trigger();
+            check_timer();
             suspend_current_and_run_next();
         }
         _ => {
@@ -95,18 +72,41 @@ pub fn trap_handler(cx: &mut TrapContext) -> ! {
             );
         }
     }
-    // 信号处理
-    handle_signals();
     // check error signals (if error then exit)
     if let Some((errno, msg)) = check_signals_error_of_current() {
         kernel!("{}", msg);
         exit_current_and_run_next(errno);
     }
-
     trap_return();
 }
 
 #[no_mangle]
+#[allow(unreachable_code)]
+pub fn trap_return() -> ! {
+    set_user_trap_entry();
+    let trap_cx_user_va = current_trap_cx_user_va();
+    let user_satp = current_user_token();
+    extern "C" {
+        fn __alltraps();
+        fn __restore();
+    }
+    let restore_va = __restore as usize - __alltraps as usize + TRAMPOLINE;
+    unsafe {
+        asm!(
+            "fence.i",
+            "jr {restore_va}",
+            restore_va = in(reg) restore_va,
+            in("a0") trap_cx_user_va,
+            in("a1") user_satp,
+            options(noreturn)
+        );
+    }
+    panic!("Unreachable in back_to_user!");
+}
+
+#[no_mangle]
 pub fn trap_from_kernel() -> ! {
-    panic!("a trap from kernel!");
+    use riscv::register::sepc;
+    println!("stval = {:#x}, sepc = {:#x}", stval::read(), sepc::read());
+    panic!("a trap {:?} from kernel!", scause::read().cause());
 }

@@ -1,3 +1,4 @@
+use super::process::ProcessControlBlock;
 use super::switch::__switch;
 use super::task::TaskStatus;
 use super::{context::TaskContext, manager::fetch_task, task::TaskControlBlock};
@@ -48,10 +49,13 @@ pub fn current_task() -> Option<Arc<TaskControlBlock>> {
     PROCESSOR.exclusive_access().current()
 }
 
+pub fn current_process() -> Arc<ProcessControlBlock> {
+    current_task().unwrap().process.upgrade().unwrap()
+}
+
 pub fn current_user_token() -> usize {
     let task = current_task().unwrap();
-    let token = task.inner_exclusive_access().get_user_token();
-    token
+    task.get_user_token()
 }
 
 pub fn current_trap_cx() -> &'static mut TrapContext {
@@ -59,6 +63,20 @@ pub fn current_trap_cx() -> &'static mut TrapContext {
         .unwrap()
         .inner_exclusive_access()
         .get_trap_cx()
+}
+
+pub fn current_trap_cx_user_va() -> usize {
+    current_task()
+        .unwrap()
+        .inner_exclusive_access()
+        .res
+        .as_ref()
+        .unwrap()
+        .trap_cx_user_va()
+}
+
+pub fn current_kstack_top() -> usize {
+    current_task().unwrap().kstack.get_top()
 }
 
 pub fn run_tasks() {
@@ -75,6 +93,8 @@ pub fn run_tasks() {
             unsafe {
                 __switch(idle_task_cx_ptr, next_task_cx_ptr);
             }
+        } else {
+            info!("no tasks available in run_tasks");
         }
     }
 }

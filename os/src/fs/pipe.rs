@@ -71,7 +71,6 @@ impl File for Pipe {
 
     fn write(&self, buf: UserBuffer) -> usize {
         assert!(self.writable());
-        let mut total_write_size = 0usize;
         let want_to_write = buf.len();
         let mut buf_iter = buf.into_iter();
         let mut already_write = 0usize;
@@ -95,7 +94,6 @@ impl File for Pipe {
                 }
             }
         }
-        already_write
     }
 }
 

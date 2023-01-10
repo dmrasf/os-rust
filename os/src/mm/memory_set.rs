@@ -1,5 +1,5 @@
 use super::page_table::*;
-use super::{address::*, frame_allocator::*, page_table};
+use super::{address::*, frame_allocator::*};
 use crate::board::MMIO;
 use crate::config::*;
 use crate::sync::UPSafeCell;
@@ -50,8 +50,9 @@ bitflags! {
     }
 }
 
+#[allow(unused)]
 pub fn remap_test() {
-    let mut kernel_space = KERNEL_SPACE.exclusive_access();
+    let kernel_space = KERNEL_SPACE.exclusive_access();
     let mid_text: VirtAddr = ((stext as usize + etext as usize) / 2).into();
     let mid_rodata: VirtAddr = ((srodata as usize + erodata as usize) / 2).into();
     let mid_data: VirtAddr = ((sdata as usize + edata as usize) / 2).into();
@@ -150,7 +151,7 @@ impl MemorySet {
         info!("mapping kernel");
         let mut memory_set = Self::new_bare();
         memory_set.map_trampoline();
-        // println!("mapping .text section");
+        info!("mapping .text section");
         memory_set.push(
             MapArea::new(
                 (stext as usize).into(),
@@ -160,7 +161,7 @@ impl MemorySet {
             ),
             None,
         );
-        // println!("mapping .rodata section");
+        info!("mapping .rodata section");
         memory_set.push(
             MapArea::new(
                 (srodata as usize).into(),
@@ -170,7 +171,7 @@ impl MemorySet {
             ),
             None,
         );
-        // println!("mapping .data section");
+        info!("mapping .data section");
         memory_set.push(
             MapArea::new(
                 (sdata as usize).into(),
@@ -180,7 +181,7 @@ impl MemorySet {
             ),
             None,
         );
-        // println!("mapping .bss section");
+        info!("mapping .bss section");
         memory_set.push(
             MapArea::new(
                 (sbss_with_stack as usize).into(),
@@ -190,7 +191,7 @@ impl MemorySet {
             ),
             None,
         );
-        // println!("mapping physical memory");
+        info!("mapping physical memory");
         memory_set.push(
             MapArea::new(
                 (ekernel as usize).into(),
@@ -200,7 +201,7 @@ impl MemorySet {
             ),
             None,
         );
-        // println!("mapping memory-mapped registers");
+        info!("mapping memory-mapped registers");
         for pair in MMIO {
             memory_set.push(
                 MapArea::new(
@@ -248,44 +249,12 @@ impl MemorySet {
                 );
             }
         }
-        // map user stack with U flags
         let max_end_va: VirtAddr = max_end_vpn.into();
-        let mut user_stack_bottom: usize = max_end_va.into();
-        // guard page
-        user_stack_bottom += PAGE_SIZE;
-        let user_stack_top = user_stack_bottom + USER_STACK_SIZE;
-        // println!(
-        //     "map user stack: top={:?}, bottom={:?}",
-        //     VirtAddr::from(user_stack_top),
-        //     VirtAddr::from(user_stack_bottom)
-        // );
-        memory_set.push(
-            MapArea::new(
-                user_stack_bottom.into(),
-                user_stack_top.into(),
-                MapType::Framed,
-                MapPermission::R | MapPermission::W | MapPermission::U,
-            ),
-            None,
-        );
-        // map TrapContext
-        // println!(
-        //     "map TrapContext: start={:?}, end={:?}",
-        //     VirtAddr::from(TRAP_CONTEXT),
-        //     VirtAddr::from(TRAMPOLINE)
-        // );
-        memory_set.push(
-            MapArea::new(
-                TRAP_CONTEXT.into(),
-                TRAMPOLINE.into(),
-                MapType::Framed,
-                MapPermission::R | MapPermission::W,
-            ),
-            None,
-        );
+        let mut user_stack_base: usize = max_end_va.into();
+        user_stack_base += PAGE_SIZE;
         (
             memory_set,
-            user_stack_top,
+            user_stack_base,
             elf.header.pt2.entry_point() as usize,
         )
     }
@@ -295,7 +264,7 @@ impl MemorySet {
         let satp = self.page_table.token();
         unsafe {
             satp::write(satp);
-            /// 清除过期快表
+            // 清除过期快表
             asm!("sfence.vma");
         }
         info!("Sv39 active");
@@ -379,6 +348,7 @@ impl MapArea {
         }
         page_table.unmap(vpn);
     }
+
     pub fn map(&mut self, page_table: &mut PageTable) {
         for vpn in self.vpn_range {
             self.map_one(page_table, vpn);
@@ -420,19 +390,4 @@ impl MapArea {
             map_perm: another.map_perm,
         }
     }
-}
-
-pub fn map_area_test() {
-    return;
-    debug!("map_area_test start");
-    let mut ma = MapArea::new(
-        0x0000.into(),
-        0x2001.into(),
-        MapType::Framed,
-        MapPermission::R,
-    );
-    let mut pt = PageTable::new();
-    info!("root_ppn: {:?}", pt.root_ppn);
-    ma.map(&mut pt);
-    debug!("map_area_test passed!");
 }

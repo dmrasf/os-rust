@@ -1,12 +1,11 @@
+#![allow(unused)]
+
 use crate::config::PAGE_SIZE;
 use crate::fs::{make_pipe, open_file, OpenFlags};
 use crate::mm::MapPermission;
-use crate::sbi::console_getchar;
-use crate::{console, task::*};
 use crate::{mm::*, task::*};
 use alloc::sync::Arc;
 use bitflags::bitflags;
-use core::arch::asm;
 
 const FD_STDOUT: usize = 1;
 const FD_STDIN: usize = 0;
@@ -55,11 +54,11 @@ bitflags! {
 }
 
 pub fn sys_open(path: *const u8, flags: u32) -> isize {
-    let task = current_task().unwrap();
+    let process = current_process();
     let token = current_user_token();
     let path = translated_str(token, path);
     if let Some(inode) = open_file(path.as_str(), OpenFlags::from_bits(flags).unwrap()) {
-        let mut inner = task.inner_exclusive_access();
+        let mut inner = process.inner_exclusive_access();
         let fd = inner.alloc_fd();
         inner.fd_table[fd] = Some(inode);
         fd as isize
@@ -69,8 +68,8 @@ pub fn sys_open(path: *const u8, flags: u32) -> isize {
 }
 
 pub fn sys_close(fd: usize) -> isize {
-    let task = current_task().unwrap();
-    let mut inner = task.inner_exclusive_access();
+    let process = current_process();
+    let mut inner = process.inner_exclusive_access();
     if fd >= inner.fd_table.len() {
         return -1;
     }
@@ -84,8 +83,8 @@ pub fn sys_close(fd: usize) -> isize {
 /// write buf of length `len`  to a file with `fd`
 pub fn sys_write(fd: usize, buf: *const u8, len: usize) -> isize {
     let token = current_user_token();
-    let task = current_task().unwrap();
-    let inner = task.inner_exclusive_access();
+    let process = current_process();
+    let inner = process.inner_exclusive_access();
     if fd >= inner.fd_table.len() {
         return -1;
     }
@@ -100,8 +99,8 @@ pub fn sys_write(fd: usize, buf: *const u8, len: usize) -> isize {
 
 pub fn sys_read(fd: usize, buf: *const u8, len: usize) -> isize {
     let token = current_user_token();
-    let task = current_task().unwrap();
-    let inner = task.inner_exclusive_access();
+    let process = current_process();
+    let inner = process.inner_exclusive_access();
     if fd >= inner.fd_table.len() {
         return -1;
     }
@@ -119,9 +118,9 @@ pub fn sys_read(fd: usize, buf: *const u8, len: usize) -> isize {
 }
 
 pub fn sys_pipe(pipe: *mut usize) -> isize {
-    let task = current_task().unwrap();
+    let process = current_process();
     let token = current_user_token();
-    let mut inner = task.inner_exclusive_access();
+    let mut inner = process.inner_exclusive_access();
     let (pipe_read, pipe_write) = make_pipe();
     let read_fd = inner.alloc_fd();
     inner.fd_table[read_fd] = Some(pipe_read);
@@ -181,17 +180,12 @@ pub fn sys_mmap(start: usize, len: usize, prot: usize) -> isize {
     let ma = MapArea::new(start.into(), (start + len).into(), MapType::Framed, mp);
     let pt = PageTable::from_token(current_user_token());
     for vpn in ma.vpn_range {
-        if let Some(pte) = pt.translate(vpn) {
-            if (pte.is_valid()) {
-                return -1;
-            }
+        if pt.translate(vpn).is_none() {
+            return -1;
         }
     }
-    let processor = PROCESSOR.exclusive_access();
-    processor
-        .current()
-        .unwrap()
-        .mmap(start.into(), (start + len).into(), mp);
+    let process = current_process();
+    process.mmap(start.into(), (start + len).into(), mp);
     for vpn in ma.vpn_range {
         if let Some(pte) = pt.translate(vpn) {
             println!("{:?}: {:?}, {:?}", vpn, pte.ppn(), pte.flags());
@@ -212,19 +206,12 @@ pub fn sys_munmap(start: usize, len: usize) -> isize {
     );
     let mut pt = PageTable::from_token(current_user_token());
     for vpn in ma.vpn_range {
-        if let Some(pte) = pt.translate(vpn) {
-            if (!pte.is_valid()) {
-                return -1;
-            }
-        } else {
+        if pt.translate(vpn).is_none() {
             return -1;
         }
     }
-    let processor = PROCESSOR.exclusive_access();
-    processor
-        .current()
-        .unwrap()
-        .munmap(start.into(), (start + len).into());
+    let process = current_process();
+    process.munmap(start.into(), (start + len).into());
     0
 }
 
@@ -233,8 +220,8 @@ pub fn sys_spawn(path: &str) -> isize {
 }
 
 pub fn sys_dup(fd: usize) -> isize {
-    let task = current_task().unwrap();
-    let mut inner = task.inner_exclusive_access();
+    let process = current_process();
+    let mut inner = process.inner_exclusive_access();
     if fd >= inner.fd_table.len() {
         return -1;
     }

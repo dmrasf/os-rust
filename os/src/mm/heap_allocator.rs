@@ -14,6 +14,7 @@ pub fn init_heap() {
     }
 }
 
+#[allow(unused)]
 pub fn heap_test() {
     debug!("heap_test start");
     use alloc::boxed::Box;

@@ -77,7 +77,7 @@ impl FrameAllocator for StackFrameAllocator {
     }
 
     fn alloc(&mut self) -> Option<PhysPageNum> {
-        let mut ret;
+        let ret;
         if let Some(ppn) = self.recycled.pop() {
             ret = Some(ppn.into());
         } else {
@@ -108,6 +108,7 @@ impl StackFrameAllocator {
     }
 }
 
+#[allow(unused)]
 pub fn frame_allocator_test() {
     debug!("frame_allocator_test start");
     let mut v: Vec<FrameTracker> = Vec::new();
