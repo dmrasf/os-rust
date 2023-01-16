@@ -7,7 +7,7 @@ use super::{
 use crate::{
     fs::*,
     mm::*,
-    sync::{Mutex, Semaphore, UPSafeCell},
+    sync::{Condvar, Mutex, Semaphore, UPSafeCell},
     trap::{context::TrapContext, trap_handler},
 };
 use alloc::vec;
@@ -38,6 +38,7 @@ pub struct ProcessControlBlockInner {
     pub task_res_allocator: RecycleAllocator,
     pub mutex_list: Vec<Option<Arc<dyn Mutex>>>,
     pub semaphore_list: Vec<Option<Arc<Semaphore>>>,
+    pub condvar_list: Vec<Option<Arc<Condvar>>>,
 }
 
 impl ProcessControlBlockInner {
@@ -101,6 +102,7 @@ impl ProcessControlBlock {
                     task_res_allocator: RecycleAllocator::new(),
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
+                    condvar_list: Vec::new(),
                 })
             },
         });
@@ -215,6 +217,7 @@ impl ProcessControlBlock {
                     task_res_allocator: RecycleAllocator::new(),
                     mutex_list: Vec::new(),
                     semaphore_list: Vec::new(),
+                    condvar_list: Vec::new(),
                 })
             },
         });
