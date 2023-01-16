@@ -28,9 +28,9 @@ const SYSCALL_MAIL_WRITE: usize = 402;
 const SYSCALL_THREAD_CREATE: usize = 1000;
 const SYSCALL_GETTID: usize = 1001;
 const SYSCALL_WAITTID: usize = 1002;
-// const SYSCALL_MUTEX_CREATE: usize = 1010;
-// const SYSCALL_MUTEX_LOCK: usize = 1011;
-// const SYSCALL_MUTEX_UNLOCK: usize = 1012;
+const SYSCALL_MUTEX_CREATE: usize = 1010;
+const SYSCALL_MUTEX_LOCK: usize = 1011;
+const SYSCALL_MUTEX_UNLOCK: usize = 1012;
 // const SYSCALL_SEMAPHORE_CREATE: usize = 1020;
 // const SYSCALL_SEMAPHORE_UP: usize = 1021;
 // const SYSCALL_SEMAPHORE_DOWN: usize = 1022;
@@ -77,6 +77,9 @@ pub fn syscall(syscall_id: usize, args: [usize; 3]) -> isize {
         SYSCALL_MMAP => sys_mmap(args[0], args[1], args[2]),
         SYSCALL_MUNMAP => sys_munmap(args[0], args[1]),
         SYSCALL_KILL => sys_kill(args[0], args[1] as u32),
+        SYSCALL_MUTEX_CREATE => sys_mutex_create(args[0] == 1),
+        SYSCALL_MUTEX_LOCK => sys_mutex_lock(args[0]),
+        SYSCALL_MUTEX_UNLOCK => sys_mutex_unlock(args[0]),
         // SYSCALL_SIGACTION => sys_sigaction(
         //     args[0] as i32,
         //     args[1] as *const SignalAction,
